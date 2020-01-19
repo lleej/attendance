@@ -103,13 +103,25 @@ def read_att_info(filepath: str) -> Optional[pd.DataFrame]:
     filename = findfile_byname(filepath, '打卡记录_')
     if filename is None:
         return None
-    df = pd.read_excel(filename)
+
     # 将第一行去掉，只保留最后四列
     # 姓名    日期      最早打卡时间      最晚打卡时间
-    df = df.iloc[1:, 2:]
-    df.columns = ['name', 'date', 'onduty', 'offduty']
+    # df = pd.read_excel(filename)
+    # df = df.iloc[1:, 2:]
+    # df.columns = ['name', 'date', 'onduty', 'offduty']
     # 对数据进行类型转换
-    df[['date', 'onduty', 'offduty']] = df[['date', 'onduty', 'offduty']].astype(np.datetime64)
+    # df[['date', 'onduty', 'offduty']] = df[['date', 'onduty', 'offduty']].astype(np.datetime64)
+
+    # 上面的四条语句，完全可以用下面的一条进行处理，效率更高
+    df = pd.read_excel(filename,
+                       header=1,
+                       names=('name', 'date', 'onduty', 'offduty'),
+                       usecols=(2, 3, 4, 5),
+                       dtype={'name': 'object',
+                              'date': 'datetime64',
+                              'onduty': 'datetime64',
+                              'offduty': 'datetime64'
+                              })
     return df
 
 
@@ -122,13 +134,18 @@ def read_abnormal_info(filepath: str) -> Optional[pd.DataFrame]:
     filename = findfile_byname(filepath, '考勤异常数据_')
     if filename is None:
         return None
-    df = pd.read_excel(filename)
-    df = pd.DataFrame({'name': df['姓名'],
-                       'date': df['开始日期'],
-                       'type': df['异常类型'],
-                       'time': df['异常时数']})
-    # 对数据进行类型转换
-    df['time'] = df['time'].astype(np.float64)
+    # df = pd.read_excel(filename)
+    # df = pd.DataFrame({'name': df['姓名'],
+    #                    'date': df['开始日期'],
+    #                    'type': df['异常类型'],
+    #                    'time': df['异常时数']})
+    # # 对数据进行类型转换
+    # df['time'] = df['time'].astype(np.float64)
+    df = pd.read_excel(filename,
+                       names=('name', 'type', 'date', 'time'),
+                       usecols=(2, 5, 6, 7),
+                       dtype={'date': 'datetime64',
+                              'time': 'float64'})
     # 筛选出 time > 8 的记录
     # 例如：XXX    2019-12-12      培训      16
     # 添加：XXX    2019-12-13      培训
@@ -155,17 +172,29 @@ def read_offwork_info(filepath: str) -> Optional[pd.DataFrame]:
     filename = findfile_byname(filepath, '请假')
     if filename is None:
         return None
-    df = pd.read_excel(filename, sheet_name=1)
-    df = df.iloc[1:, 2:-1]
-    df.columns = ['name', 'type', 'date', 'enddate', 'time']
-    df.drop(['enddate'], axis=1, inplace=True)
-    # 对数据进行类型转换
-    df['date'] = df['date'].astype(np.datetime64)
-    df['time'] = df['time'].astype(np.float64)
+
+    # df = pd.read_excel(filename, sheet_name=1)
+    # df = df.iloc[1:, 2:-1]
+    # df.columns = ['name', 'type', 'date', 'enddate', 'time']
+    # df.drop(['enddate'], axis=1, inplace=True)
+    # # 对数据进行类型转换
+    # df['date'] = df['date'].astype(np.datetime64)
+    # df['time'] = df['time'].astype(np.float64)
     # 单位转换为小时 * 8
-    df['time'] = df['time'] * 8
+    # df['time'] = df['time'] * 8
     # 将请假类型转换为中文描述
-    df['type'] = df.apply(lambda row: conf.HOLIDAY_TYPE[str(row.type)], axis=1)
+    # df['type'] = df.apply(lambda row: conf.HOLIDAY_TYPE[str(row.type)], axis=1)
+
+    # Both a converter and dtype were specified for column time - only the converter will be used
+    # converters 和 dtype 不能同时设置一个列
+    df = pd.read_excel(filename,
+                       sheet_name=1,
+                       header=1,
+                       usecols=(2, 3, 4, 6),
+                       names=('name', 'type', 'date', 'time'),
+                       dtype={'date': 'datetime64'},
+                       converters={'time': lambda x: float(x) * 8,
+                                   'type': lambda x: conf.HOLIDAY_TYPE[str(x)]})
     return df
 
 
@@ -180,13 +209,16 @@ def general_blank_dataframe(filepath: str, enddate: str, df: pd.DataFrame) -> Op
         max_date = pd.Timestamp(enddate)
     except:
         max_date = df['date'].max()
-    names = df['name'].drop_duplicates()
+    names = df['name'].drop_duplicates().tolist()
     days = make_workdays(max_date.year, max_date.month, max_date)
-    df_blank = pd.DataFrame(columns=['name', 'date'])
-    for name in names:
-        for day in days:
-            df_blank = df_blank.append({'name': name, 'date': day}, ignore_index=True)
-    df_blank['date'] = df_blank['date'].astype(np.datetime64)
+    # 使用字典进行数据初始化，每个key是一个列标签，每个value是数据
+    init_data = {'name': sorted(names * len(days)),
+                 'date': days * len(names)}
+    df_blank = pd.DataFrame(data=init_data)
+    # for name in names:
+    #     for day in days:
+    #         df_blank = df_blank.append({'name': name, 'date': day}, ignore_index=True)
+    # df_blank['date'] = df_blank['date'].astype(np.datetime64)
     return df_blank
 
 
