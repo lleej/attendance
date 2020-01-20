@@ -1,7 +1,9 @@
 from argparse import ArgumentParser
 from datetime import timedelta
+import logging
 from math import ceil
 from os import path, listdir
+import sys
 from typing import List, Optional
 
 import numpy as np
@@ -35,6 +37,11 @@ import conf
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    stream=sys.stdout)
+logger = logging.getLogger(__name__)
 
 
 def make_workdays(year, month: int, max_date: np.datetime64 = None) -> List["Timestamp"]:
@@ -113,16 +120,21 @@ def read_att_info(filepath: str) -> Optional[pd.DataFrame]:
     # df[['date', 'onduty', 'offduty']] = df[['date', 'onduty', 'offduty']].astype(np.datetime64)
 
     # 上面的四条语句，完全可以用下面的一条进行处理，效率更高
-    df = pd.read_excel(filename,
-                       header=1,
-                       names=('name', 'date', 'onduty', 'offduty'),
-                       usecols=(2, 3, 4, 5),
-                       dtype={'name': 'object',
-                              'date': 'datetime64',
-                              'onduty': 'datetime64',
-                              'offduty': 'datetime64'
-                              })
-    return df
+    logger.info(f'从文件{filename}中，读取打卡记录...')
+    try:
+        df = pd.read_excel(filename,
+                           header=1,
+                           names=('name', 'date', 'onduty', 'offduty'),
+                           usecols=(2, 3, 4, 5),
+                           dtype={'name': 'object',
+                                  'date': 'datetime64',
+                                  'onduty': 'datetime64',
+                                  'offduty': 'datetime64'
+                                  })
+        return df
+    except Exception as e:
+        logger.error(f'读取打卡记录失败. {e}')
+        return None
 
 
 def read_abnormal_info(filepath: str) -> Optional[pd.DataFrame]:
@@ -141,26 +153,31 @@ def read_abnormal_info(filepath: str) -> Optional[pd.DataFrame]:
     #                    'time': df['异常时数']})
     # # 对数据进行类型转换
     # df['time'] = df['time'].astype(np.float64)
-    df = pd.read_excel(filename,
-                       names=('name', 'type', 'date', 'time'),
-                       usecols=(2, 5, 6, 7),
-                       dtype={'date': 'datetime64',
-                              'time': 'float64'})
-    # 筛选出 time > 8 的记录
-    # 例如：XXX    2019-12-12      培训      16
-    # 添加：XXX    2019-12-13      培训
-    df_1 = df[df['time'] > 8]
-    for i in range(len(df_1)):
-        row = df_1.iloc[i]
-        time = row['time']
-        for j in range(ceil(time / 8) - 1):
-            value = row.copy()
-            value['date'] = get_next_workday(value['date'], j + 1)
-            value['time'] = np.NaN
-            df = df.append(value, ignore_index=True)
-    # 去掉重复的记录
-    df = df.drop_duplicates()
-    return df
+    logger.info(f'从文件{filename}中，读取考勤异常记录...')
+    try:
+        df = pd.read_excel(filename,
+                           names=('name', 'type', 'date', 'time'),
+                           usecols=(2, 5, 6, 7),
+                           dtype={'date': 'datetime64',
+                                  'time': 'float64'})
+        # 筛选出 time > 8 的记录
+        # 例如：XXX    2019-12-12      培训      16
+        # 添加：XXX    2019-12-13      培训
+        df_1 = df[df['time'] > 8]
+        for i in range(len(df_1)):
+            row = df_1.iloc[i]
+            time = row['time']
+            for j in range(ceil(time / 8) - 1):
+                value = row.copy()
+                value['date'] = get_next_workday(value['date'], j + 1)
+                value['time'] = np.NaN
+                df = df.append(value, ignore_index=True)
+        # 去掉重复的记录
+        df = df.drop_duplicates()
+        return df
+    except Exception as e:
+        logger.error(f'读取考勤异常记录失败. {e}')
+        return None
 
 
 def read_offwork_info(filepath: str) -> Optional[pd.DataFrame]:
@@ -187,15 +204,20 @@ def read_offwork_info(filepath: str) -> Optional[pd.DataFrame]:
 
     # Both a converter and dtype were specified for column time - only the converter will be used
     # converters 和 dtype 不能同时设置一个列
-    df = pd.read_excel(filename,
-                       sheet_name=1,
-                       header=1,
-                       usecols=(2, 3, 4, 6),
-                       names=('name', 'type', 'date', 'time'),
-                       dtype={'date': 'datetime64'},
-                       converters={'time': lambda x: float(x) * 8,
-                                   'type': lambda x: conf.HOLIDAY_TYPE[str(x)]})
-    return df
+    logger.info(f'从文件{filename}中，读取请假记录...')
+    try:
+        df = pd.read_excel(filename,
+                           sheet_name=1,
+                           header=1,
+                           usecols=(2, 3, 4, 6),
+                           names=('name', 'type', 'date', 'time'),
+                           dtype={'date': 'datetime64'},
+                           converters={'time': lambda x: float(x) * 8,
+                                       'type': lambda x: conf.HOLIDAY_TYPE[str(x)]})
+        return df
+    except Exception as e:
+        logger.error(f'读取请假记录失败. {e}')
+        return None
 
 
 def general_blank_dataframe(filepath: str, enddate: str, df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -265,6 +287,7 @@ def general_final_info(filepath: str, enddate: str) -> Optional[pd.DataFrame]:
     df_abnormal = read_abnormal_info(filepath)
     df_offwork = read_offwork_info(filepath)
     # 生成空表，由人员和本月的工作时间组成 (name, date)
+    logger.info('开始考勤数据整理...')
     df_final = general_blank_dataframe(filepath, enddate, df_att)
     # 合并考勤异常和请假
     df_abn = pd.concat([df_abnormal, df_offwork], sort=False)
@@ -276,6 +299,7 @@ def general_final_info(filepath: str, enddate: str) -> Optional[pd.DataFrame]:
     df_final['chidao'] = df_final.apply(_general_chidao, axis=1)
     # 生成考勤异常
     df_final['abn'] = df_final.apply(_general_abnormal, axis=1)
+    logger.info('考勤数据整理完成')
     return df_final
 
 
@@ -344,6 +368,7 @@ def write_to_excel(df_data: pd.DataFrame, filename: str) -> None:
     df_data_header = ['姓名', '日期', '上班打卡', '下班打卡', '异常类型', '异常时数', '迟到/早退', '考勤异常（未有打卡记录）']
     df_group_header = ['迟到/早退', '考勤异常（未有打卡记录）']
     # 写入文件中
+    logger.info(f'将考勤汇总数据写入文件{filename}中...')
     with pd.ExcelWriter(filename) as writer:
         df_data.to_excel(writer, sheet_name='详情', header=df_data_header, index=False)
         df_group.to_excel(writer, sheet_name='汇总', header=df_group_header, index_label='姓名')
@@ -352,12 +377,14 @@ def write_to_excel(df_data: pd.DataFrame, filename: str) -> None:
 
 
 def main():
+    logger.info('开始处理考勤...')
     parser = ArgumentParser(description='生成每月考勤汇总记录.')
     parser.add_argument('path', help="请输入存放考勤记录的目录", default='.')
     parser.add_argument('enddate', help="请输入考勤统计的截止日期，如：20200122")
     args = parser.parse_args()
     df = general_final_info(args.path, args.enddate)
     write_to_excel(df, f'实验室打卡记录汇总-{args.enddate}.xlsx')
+    logger.info('考勤处理完成!')
 
 
 if __name__ == '__main__':
